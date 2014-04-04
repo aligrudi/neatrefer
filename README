@@ -1,0 +1,11 @@
+NEATREFER
+=========
+
+Neatrefer troff preprocessor is a small refer clone for managing
+bibliographic references.  It assumes each record in the database has
+an 'L' key which specifies the label of the record.  When referencing,
+only this key is searched among the records in the database; thus
+neatrefer is not compatible with the original refer.  A new -m
+parameter has been added to allow multiple references in a single
+.[/.] macro, as white space separated list of labels; refer tries to
+use reference intervals if possible.
