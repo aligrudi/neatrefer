@@ -1,7 +1,7 @@
 /*
  * neatrefer - a small refer clone
  *
- * Copyright (C) 2011-2014 Ali Gholami Rudi <ali at rudi dot ir>
+ * Copyright (C) 2011-2015 Ali Gholami Rudi <ali at rudi dot ir>
  *
  * This program is released under the Modified BSD license.
  */
@@ -193,9 +193,9 @@ static void refer_cite(int fd, char *b, char *e)
 	s = strchr(b, '\n') + 1;
 	while (!nid || multiref) {
 		r = label;
-		while (s < e && isspace(*s))
+		while (s < e && (isspace(*s) || *s == ','))
 			s++;
-		while (s < e && !isspace(*s))
+		while (s < e && !isspace(*s) && *s != ',')
 			*r++ = *s++;
 		*r = '\0';
 		if (s >= e)
