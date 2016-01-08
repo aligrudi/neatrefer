@@ -1,7 +1,7 @@
 /*
  * neatrefer - a small refer clone
  *
- * Copyright (C) 2011-2015 Ali Gholami Rudi <ali at rudi dot ir>
+ * Copyright (C) 2011-2016 Ali Gholami Rudi <ali at rudi dot ir>
  *
  * This program is released under the Modified BSD license.
  */
@@ -12,8 +12,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#define BUFSZ		(1 << 21)
-#define NREFS		(1 << 12)
+#define NREFS		(1 << 14)
+#define LEN(a)		(sizeof(a) / sizeof((a)[0]))
 
 struct ref {
 	char *keys[128];	/* reference keys */
@@ -22,73 +22,72 @@ struct ref {
 	int nauth;
 };
 
-static struct ref refs[NREFS];	/* all references in refer db */
-static int nrefs;
-static struct ref *added[NREFS];/* cited references */
-static int nadded = 1;
+static struct ref refs[NREFS];	/* all references in refer database */
+static int refs_n;
+static struct ref *cites[NREFS];	/* cited references */
+static int cites_n = 1;
 static int inserted;		/* number of inserted references */
 static int multiref;		/* allow specifying multiple references */
 static int accumulate;		/* accumulate all references */
+static char *refmac;		/* citation macro name */
+static FILE *refdb;		/* the database file */
 
 #define ref_label(ref)		((ref)->keys['L'])
 
-static int xread(int fd, char *buf, int len)
+/* the next input line */
+static char *lnget(void)
 {
-	int nr = 0;
-	while (nr < len) {
-		int ret = read(fd, buf + nr, len - nr);
-		if (ret <= 0)
-			break;
-		nr += ret;
-	}
-	return nr;
+	static char buf[1024];
+	return fgets(buf, sizeof(buf), stdin);
 }
 
-static int xwrite(int fd, char *buf, int len)
+/* write an output line */
+static void lnput(char *s, int n)
 {
-	int nw = 0;
-	while (nw < len) {
-		int ret = write(fd, buf + nw, len - nw);
-		if (ret < 0)
-			break;
-		nw += ret;
-	}
-	return nw;
+	write(1, s, n >= 0 ? n : strlen(s));
+}
+
+/* the next refer database input line */
+static char *dbget(void)
+{
+	static char buf[1024];
+	return refdb ? fgets(buf, sizeof(buf), refdb) : NULL;
+}
+
+static char *sdup(char *s)
+{
+	char *e = strchr(s, '\n') ? strchr(s, '\n') : strchr(s, '\0');
+	char *r;
+	int n = e - s;
+	r = malloc(n + 1);
+	memcpy(r, s, n);
+	r[n] = '\0';
+	return r;
 }
 
 /* read a single refer record */
-static char *db_ref(char *s, struct ref *ref)
+static void db_ref(struct ref *ref, char *ln)
 {
-	char *end;
-	while (*s != '\n') {
-		end = strchr(s, '\n');
-		if (!end)
-			return strchr(s, '\0');
-		*end = '\0';
-		if (s[0] == '%' && s[1] >= 'A' && s[1] <= 'Z') {
-			char *r = s + 2;
-			while (isspace(*r))
+	do {
+		if (ln[0] == '%' && ln[1] >= 'A' && ln[1] <= 'Z') {
+			char *r = ln + 2;
+			while (isspace((unsigned char) *r))
 				r++;
-			if (s[1] == 'A')
-				ref->auth[ref->nauth++] = r;
+			if (ln[1] == 'A')
+				ref->auth[ref->nauth++] = sdup(r);
 			else
-				ref->keys[(unsigned) s[1]] = r;
+				ref->keys[(unsigned char) ln[1]] = sdup(r);
 		}
-		s = end + 1;
-		while (*s == ' ' || *s == '\t')
-			s++;
-	}
-	return s;
+	} while ((ln = dbget()) && ln[0] != '\n');
 }
 
 /* parse a refer-style bib file and fill refs[] */
-static int db_parse(char *s)
+static int db_parse(void)
 {
-	while (*s) {
-		while (isspace(*s))
-			s++;
-		s = db_ref(s, &refs[nrefs++]);
-	}
+	char *ln;
+	while ((ln = dbget()))
+		if (ln[0] != '\n')
+			db_ref(&refs[refs_n++], ln);
 	return 0;
 }
 
@@ -109,12 +108,11 @@ static int ref_kind(struct ref *r)
 	return 0;
 }
 
-static char list[BUFSZ];
-
 /* print the given reference */
-static void ins_ref(int fd, struct ref *ref, int id)
+static void ref_ins(struct ref *ref, int id)
 {
-	char *s = list;
+	char buf[1 << 12];
+	char *s = buf;
 	int kind = ref_kind(ref);
 	int j;
 	s += sprintf(s, ".ds [F %d\n", id);
@@ -134,29 +132,17 @@ static void ins_ref(int fd, struct ref *ref, int id)
 			s += sprintf(s, ".nr [%c 1\n", j);
 	}
 	s += sprintf(s, ".][ %d %s\n", kind, kinds[kind]);
-	xwrite(fd, list, s - list);
+	lnput(buf, s - buf);
 }
 
 /* print all references */
-static void ins_all(int fd)
+static void ref_all(void)
 {
 	int i;
-	char *beg = ".]<\n";
-	char *end = ".]>";
-	xwrite(fd, beg, strlen(beg));
-	for (i = 1; i < nadded; i++)
-		ins_ref(fd, added[i], i);
-	xwrite(fd, end, strlen(end));
-}
-
-/* strcpy from s to d; ignore the initial jump chars and stop at stop chars */
-static void cut(char *d, char *s, char *jump, char *stop)
-{
-	while (strchr(jump, *s))
-		s++;
-	while (*s && !strchr(stop, *s))
-		*d++ = *s++;
-	*d = '\0';
+	lnput(".]<\n", -1);
+	for (i = 1; i < cites_n; i++)
+		ref_ins(cites[i], i);
+	lnput(".]>", -1);
 }
 
 static int intcmp(void *v1, void *v2)
@@ -164,44 +150,39 @@ static int intcmp(void *v1, void *v2)
 	return *(int *) v1 - *(int *) v2;
 }
 
-/* the given label was referenced; add it to added[] */
+/* the given label was referenced; add it to cites[] */
 static int refer_seen(char *label)
 {
 	int i;
-	for (i = 0; i < nrefs; i++)
+	for (i = 0; i < refs_n; i++)
 		if (ref_label(&refs[i]) && !strcmp(label, ref_label(&refs[i])))
 			break;
-	if (i == nrefs)
+	if (i == refs_n)
 		return -1;
 	if (!refs[i].id) {
-		refs[i].id = nadded++;
-		added[refs[i].id] = &refs[i];
+		refs[i].id = cites_n++;
+		cites[refs[i].id] = &refs[i];
 	}
 	return refs[i].id;
 }
 
 /* replace .[ .] macros with reference numbers */
-static void refer_cite(int fd, char *b, char *e)
+static void refer_cite(char *s)
 {
-	char msg[128];
-	char label[128];
-	char *s, *r;
-	int id[128];
+	char msg[256];
+	char label[256];
+	int id[256];
 	int nid = 0;
-	int i;
-	/* parse to see what is inside .[ and .]*/
-	s = strchr(b, '\n') + 1;
+	int i = 0;
 	while (!nid || multiref) {
-		r = label;
-		while (s < e && (isspace(*s) || *s == ','))
+		char *r = label;
+		while (*s && strchr(" \t\n,", (unsigned char) *s))
 			s++;
-		while (s < e && !isspace(*s) && *s != ',')
+		while (*s && !strchr(" \t\n,]", (unsigned char) *s))
 			*r++ = *s++;
 		*r = '\0';
-		if (s >= e)
-			break;
 		if (!strcmp("$LIST$", label)) {
-			ins_all(fd);
+			ref_all();
 			break;
 		}
 		id[nid] = refer_seen(label);
@@ -209,12 +190,12 @@ static void refer_cite(int fd, char *b, char *e)
 			fprintf(stderr, "refer: <%s> not found\n", label);
 		else
 			nid++;
+		if (!*s || *s == '\n' || *s == ']')
+			break;
 	}
-	/* read characters after .[ */
-	cut(msg, b + 2, "", "\n");
 	/* sort references for cleaner reference intervals */
 	qsort(id, nid, sizeof(id[0]), (void *) intcmp);
-	i = 0;
+	msg[0] = '\0';
 	while (i < nid) {
 		int beg = i++;
 		/* reading reference intervals */
@@ -228,56 +209,71 @@ static void refer_cite(int fd, char *b, char *e)
 			sprintf(msg + strlen(msg), "%d%s%d",
 				id[beg], beg < i - 2 ? "\\-" : ",", id[i - 1]);
 	}
-	/* read characters after .] */
-	cut(msg + strlen(msg), e + 2, "", "\n");
-	xwrite(fd, msg, strlen(msg));
-	xwrite(fd, "\n", 1);
-	/* insert the reference if not accumulating them */
+	lnput(msg, -1);
 	if (!accumulate)
 		for (i = 0; i < nid; i++)
-			ins_ref(fd, added[id[i]], ++inserted);
+			ref_ins(cites[id[i]], ++inserted);
 }
 
-/* read the input s and write refer output to fd */
-static void refer(int fd, char *s)
+static int startswith(char *r, char *s)
 {
-	char *l = s;
-	char *b, *e;
-	while (*s) {
-		char *r = strchr(s, '\n');
-		if (!r)
-			break;
-		if (r[1] == '.' && r[2] == '[') {
-			b = strchr(r + 1, '\n');
-			e = strchr(b + 1, '\n');
-			while (e && (e[1] != '.' || e[2] != ']'))
-				e = strchr(e + 1, '\n');
-			if (!e)
-				break;
-			xwrite(fd, l, r - l + 1);
-			s = strchr(e + 1, '\n');
-			l = s + 1;
-			refer_cite(fd, r + 1, e + 1);
-		}
-		s = r + 1;
-	}
-	xwrite(fd, l, strchr(l, '\0') - l);
+	while (*s)
+		if (*s++ != *r++)
+			return 0;
+	return 1;
 }
 
-static char buf[BUFSZ];
-static char bib[BUFSZ];
+static int slen(char *s, int delim)
+{
+	char *r = strchr(s, delim);
+	return r ? r - s : strchr(s, '\0') - s;
+}
+
+static void refer(void)
+{
+	char refsig[256];
+	char *s, *r, *ln;
+	sprintf(refsig, "*[%s ", refmac ? refmac : "cite");
+	while ((ln = lnget())) {
+		if (ln[0] == '.' && ln[1] == '[') {
+			lnput(ln + 2, slen(ln + 2, '\n'));
+			if ((ln = lnget())) {
+				refer_cite(ln);
+				while (ln && (ln[0] != '.' || ln[1] != ']'))
+					ln = lnget();
+				if (ln)
+					lnput(ln + 2, -1);
+			}
+			continue;
+		}
+		s = ln;
+		r = s;
+		while ((r = strchr(r, '\\'))) {
+			r++;
+			if (!startswith(r, refsig))
+				continue;
+			if (!strchr(r, ']'))
+				continue;
+			r += strlen(refsig);
+			lnput(s, r - s);
+			refer_cite(r);
+			s = strchr(r, ']');
+		}
+		lnput(s, -1);
+	}
+}
 
 static char *usage =
 	"Usage neatrefer [options] <input >output\n"
 	"Options:\n"
 	"\t-p bib    \tspecify the database file\n"
 	"\t-e        \taccumulate references\n"
-	"\t-m        \tmerge multiple references in a single .[/.] block\n";
+	"\t-m        \tmerge multiple references in a single .[/.] block\n"
+	"\t-o xy     \tinline citation macro (\\*[xy label])\n";
 
 int main(int argc, char *argv[])
 {
-	char *bfile = NULL;
-	int i;
+	int i, j;
 	for (i = 1; i < argc; i++) {
 		switch (argv[i][0] == '-' ? argv[i][1] : 'h') {
 		case 'm':
@@ -287,20 +283,29 @@ int main(int argc, char *argv[])
 			accumulate = 1;
 			break;
 		case 'p':
-			bfile = argv[i][2] ? argv[i] + 2 : argv[++i];
+			refdb = fopen(argv[i][2] ? argv[i] + 2 : argv[++i], "r");
+			if (refdb) {
+				db_parse();
+				fclose(refdb);
+			}
+			refdb = NULL;
+			break;
+		case 'o':
+			refmac = argv[i][2] ? argv[i] + 2 : argv[++i];
 			break;
 		default:
 			printf("%s", usage);
 			return 1;
 		}
 	}
-	if (bfile) {
-		int fd = open(bfile, O_RDONLY);
-		xread(fd, bib, sizeof(bib) - 1);
-		db_parse(bib);
-		close(fd);
-	}
-	xread(0, buf, sizeof(buf) - 1);
-	refer(1, buf);
+	refer();
+	for (i = 0; i < refs_n; i++)
+		for (j = 0; j < LEN(refs[i].keys); j++)
+			if (refs[i].keys[j])
+				free(refs[i].keys[j]);
+	for (i = 0; i < refs_n; i++)
+		for (j = 0; j < LEN(refs[i].auth); j++)
+			if (refs[i].auth[j])
+				free(refs[i].auth[j]);
 	return 0;
 }
