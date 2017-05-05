@@ -1,7 +1,7 @@
 /*
  * NEATREFER - A REFER CLONE FOR NEATROFF
  *
- * Copyright (C) 2011-2016 Ali Gholami Rudi <ali at rudi dot ir>
+ * Copyright (C) 2011-2017 Ali Gholami Rudi <ali at rudi dot ir>
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -39,6 +39,7 @@ static int cites_n = 1;
 static int inserted;		/* number of inserted references */
 static int multiref;		/* allow specifying multiple references */
 static int accumulate;		/* accumulate all references */
+static int authorinitials;	/* initials for authors' first name */
 static char *refmac;		/* citation macro name */
 static FILE *refdb;		/* the database file */
 
@@ -75,6 +76,55 @@ static char *sdup(char *s)
 	return r;
 }
 
+/* format author names as J. Smith */
+static char *ref_author(char *ref)
+{
+	char *res;
+	char *out;
+	char *beg;
+	if (!authorinitials)
+		return sdup(ref);
+	res = malloc(strlen(ref) + 32);
+	out = res;
+	while (1) {
+		while (*ref == ' ' || *ref == '.')
+			ref++;
+		if (*ref == '\0')
+			break;
+		beg = ref;
+		while (*ref && *ref != ' ' && *ref != '.')
+			ref++;
+		if (out != res)
+			*out++ = ' ';
+		if (islower((unsigned char) *beg) || *ref == '\0') {
+			while (beg < ref)
+				*out++ = *beg++;
+		} else {				/* initials */
+			do {
+				*out++ = *beg++;
+				*out++ = '.';
+				while (beg < ref && *beg != '-')
+					beg++;
+				if (*beg == '-')	/* handling J.-K. Smith */
+					*out++ = *beg++;
+			} while (beg < ref);
+		}
+	}
+	*out = '\0';
+	return res;
+}
+
+/* strip excess whitespace */
+static void rstrip(char *s)
+{
+	int i;
+	int last = -1;
+	for (i = 0; s[i]; i++)
+		if (s[i] != ' ' && s[i] != '\n')
+			last = i;
+	s[last + 1] = '\0';
+}
+
 /* read a single refer record */
 static void db_ref(struct ref *ref, char *ln)
 {
@@ -83,8 +133,9 @@ static void db_ref(struct ref *ref, char *ln)
 			char *r = ln + 2;
 			while (isspace((unsigned char) *r))
 				r++;
+			rstrip(r);
 			if (ln[1] == 'A')
-				ref->auth[ref->nauth++] = sdup(r);
+				ref->auth[ref->nauth++] = ref_author(r);
 			else
 				ref->keys[(unsigned char) ln[1]] = sdup(r);
 		}
@@ -279,6 +330,7 @@ static char *usage =
 	"\t-p bib    \tspecify the database file\n"
 	"\t-e        \taccumulate references\n"
 	"\t-m        \tmerge multiple references in a single .[/.] block\n"
+	"\t-i        \tinitials for authors' first and middle names\n"
 	"\t-o xy     \tinline citation macro (\\*[xy label])\n";
 
 int main(int argc, char *argv[])
@@ -302,6 +354,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'o':
 			refmac = argv[i][2] ? argv[i] + 2 : argv[++i];
+			break;
+		case 'i':
+			authorinitials = 1;
 			break;
 		default:
 			printf("%s", usage);
