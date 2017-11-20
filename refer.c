@@ -39,7 +39,8 @@ static int cites_n = 1;
 static int inserted;		/* number of inserted references */
 static int multiref;		/* allow specifying multiple references */
 static int accumulate;		/* accumulate all references */
-static int authorinitials;	/* initials for authors' first name */
+static int initials;		/* initials for authors' first name */
+static int refauth;		/* use author-year citations */
 static char *refmac;		/* citation macro name */
 static FILE *refdb;		/* the database file */
 
@@ -82,7 +83,7 @@ static char *ref_author(char *ref)
 	char *res;
 	char *out;
 	char *beg;
-	if (!authorinitials)
+	if (!initials)
 		return sdup(ref);
 	res = malloc(strlen(ref) + 32);
 	out = res;
@@ -227,6 +228,37 @@ static int refer_seen(char *label)
 	return refs[i].id;
 }
 
+static char *refer_lastname(char *name)
+{
+	char *last = name;
+	while (*name) {
+		if (!islower((unsigned char) last[0]))
+			last = name;
+		while (*name && *name != ' ')
+			if (*name++ == '\\')
+				name++;
+		while (*name == ' ')
+			name++;
+	}
+	return last;
+}
+
+static void refer_quote(char *d, char *s)
+{
+	if (!strchr(s, ' ') && s[0] != '"') {
+		strcpy(d, s);
+	} else {
+		*d++ = '"';
+		while (*s) {
+			if (*s == '"')
+				*d++ = '"';
+			*d++ = *s++;
+		}
+		*d++ = '"';
+		*d = '\0';
+	}
+}
+
 /* replace .[ .] macros with reference numbers */
 static void refer_cite(char *s)
 {
@@ -254,34 +286,35 @@ static void refer_cite(char *s)
 		if (!*s || *s == '\n' || *s == ']')
 			break;
 	}
-	/* sort references for cleaner reference intervals */
-	qsort(id, nid, sizeof(id[0]), (void *) intcmp);
-	msg[0] = '\0';
-	while (i < nid) {
-		int beg = i++;
-		/* reading reference intervals */
-		while (i < nid && id[i] == id[i - 1] + 1)
-			i++;
-		if (beg)
-			sprintf(msg + strlen(msg), ",");
-		if (beg == i - 1)
-			sprintf(msg + strlen(msg), "%d", id[beg]);
-		else
-			sprintf(msg + strlen(msg), "%d%s%d",
-				id[beg], beg < i - 2 ? "\\-" : ",", id[i - 1]);
+	if (!refauth) {		/* numbered citations */
+		/* sort references for cleaner reference intervals */
+		qsort(id, nid, sizeof(id[0]), (void *) intcmp);
+		msg[0] = '\0';
+		while (i < nid) {
+			int beg = i++;
+			/* reading reference intervals */
+			while (i < nid && id[i] == id[i - 1] + 1)
+				i++;
+			if (beg)
+				sprintf(msg + strlen(msg), ",");
+			if (beg == i - 1)
+				sprintf(msg + strlen(msg), "%d", id[beg]);
+			else
+				sprintf(msg + strlen(msg), "%d%s%d",
+					id[beg], beg < i - 2 ? "\\-" : ",", id[i - 1]);
+		}
+	} else {		/* year + authors citations */
+		struct ref *cur = cites[id[0]];
+		sprintf(msg, "%s %d", cur->keys['D'] ? cur->keys['D'] : "-", cur->nauth);
+		for (i = 0; i < cur->nauth; i++) {
+			sprintf(msg + strlen(msg), " ");
+			refer_quote(msg + strlen(msg), refer_lastname(cur->auth[i]));
+		}
 	}
 	lnput(msg, -1);
 	if (!accumulate)
 		for (i = 0; i < nid; i++)
 			ref_ins(cites[id[i]], ++inserted);
-}
-
-static int startswith(char *r, char *s)
-{
-	while (*s)
-		if (*s++ != *r++)
-			return 0;
-	return 1;
 }
 
 static int slen(char *s, int delim)
@@ -290,12 +323,38 @@ static int slen(char *s, int delim)
 	return r ? r - s : strchr(s, '\0') - s;
 }
 
+static int refer_reqname(char *mac, int maclen, char *s)
+{
+	int i = 0;
+	if (*s++ != '.')
+		return 1;
+	for (i = 0; i < maclen && *s && *s != ' '; i++)
+		mac[i] = *s++;
+	mac[i] = '\0';
+	return *s != ' ';
+}
+
+static int refer_macname(char *mac, int maclen, char *s)
+{
+	int i = 0;
+	if (*s++ != '\\')
+		return 1;
+	if (*s++ != '*')
+		return 1;
+	if (*s++ != '[')
+		return 1;
+	for (i = 0; i < maclen && *s && *s != ' '; i++)
+		mac[i] = *s++;
+	mac[i] = '\0';
+	return *s != ' ';
+}
+
 static void refer(void)
 {
-	char refsig[256];
+	char mac[256];
 	char *s, *r, *ln;
-	sprintf(refsig, "*[%s ", refmac ? refmac : "cite");
 	while ((ln = lnget())) {
+		/* multi-line citations: .[ rudi17 .] */
 		if (ln[0] == '.' && ln[1] == '[') {
 			lnput(ln + 2, slen(ln + 2, '\n'));
 			if ((ln = lnget())) {
@@ -307,18 +366,38 @@ static void refer(void)
 			}
 			continue;
 		}
+		/* single line citation .cite rudi17 */
+		if (ln[0] == '.' && !refer_reqname(mac, sizeof(mac), ln) &&
+				strstr(refmac, mac)) {
+			int i = 1;
+			while (ln[i] && ln[i] != ' ')
+				i++;
+			while (ln[i] && ln[i] == ' ')
+				i++;
+			lnput(ln, i);
+			refer_cite(ln + i);
+			while (ln[i] && ln[i] != ' ' && ln[i] != '\n')
+				i++;
+			lnput(ln + i, -1);
+			continue;
+		}
 		s = ln;
 		r = s;
+		/* inline citations \*[cite rudi17] */
 		while ((r = strchr(r, '\\'))) {
 			r++;
-			if (!startswith(r, refsig))
+			if (refer_macname(mac, sizeof(mac), r - 1))
+				continue;
+			if (!strstr(refmac, mac))
 				continue;
 			if (!strchr(r, ']'))
 				continue;
-			r += strlen(refsig);
+			r = strchr(r, ' ') + 1;
 			lnput(s, r - s);
 			refer_cite(r);
-			s = strchr(r, ']');
+			while (*r && *r != ' ' && *r != ']')
+				r++;
+			s = r;
 		}
 		lnput(s, -1);
 	}
@@ -331,7 +410,8 @@ static char *usage =
 	"\t-e        \taccumulate references\n"
 	"\t-m        \tmerge multiple references in a single .[/.] block\n"
 	"\t-i        \tinitials for authors' first and middle names\n"
-	"\t-o xy     \tinline citation macro (\\*[xy label])\n";
+	"\t-o xy     \tcitation macro (\\*[xy label])\n"
+	"\t-a        \tuse author-year citation style\n";
 
 int main(int argc, char *argv[])
 {
@@ -356,12 +436,19 @@ int main(int argc, char *argv[])
 			refmac = argv[i][2] ? argv[i] + 2 : argv[++i];
 			break;
 		case 'i':
-			authorinitials = 1;
+			initials = 1;
+			break;
+		case 'a':
+			refauth = 1;
 			break;
 		default:
 			printf("%s", usage);
 			return 1;
 		}
+	}
+	if (refauth && multiref) {
+		fprintf(stderr, "refer: cannot use -m with -a\n");
+		return 1;
 	}
 	refer();
 	for (i = 0; i < refs_n; i++)
