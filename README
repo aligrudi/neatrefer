@@ -2,13 +2,35 @@ NEATREFER
 =========
 
 Neatrefer troff preprocessor is a small refer clone for managing
-bibliographic references.  It assumes each record in the database has
-an 'L' key, which specifies the label of the record.  When
+bibliographic references.  It assumes that each record in the database
+has an 'L' key, which specifies the label of the record.  When
 referencing, only this key is looked up among the records in the
-database.  Thus, neatrefer is not compatible with the original refer.
+database.  Therefore, Neatrefer is not compatible with the original
+refer.
 
-With -m option, neatrefer allows multiple references in a single .[/.]
-macro, as space or comma separated list of labels; refer tries to use
-reference intervals for them if possible.  Also, inline citation
-macros are supported with -o option; e.g., with -ocite option,
-\*[cite label] can be used for citing a reference with key label.
+Citing in Neatrefer can be done by including the label of the record
+between .[ and .] request lines.  In addition, other citation macros
+can be defined using -o option.  For example with -ocite option,
+the record with label utp87 can be cited as follows:
+
+  .cite utp87
+  \*[cite utp87]
+
+When using numbered citation style Neatrefer replaces them with the
+following lines:
+
+  .cite 1
+  \*[cite 1]
+
+And when using author-year citation style (-a option), Neatrefer
+replaces them with with the following lines (after the citation macro,
+publication date, the number of authors, and last names of the authors
+appear):
+
+  .cite 1987 2 Dougherty O'Reilly
+  \*[cite 1987 2 Dougherty O'Reilly]
+
+With -m option, Neatrefer allows multiple references in a single
+citation, as a comma separated list of labels; refer tries to use
+reference intervals for them if possible (-a and -m cannot be used
+together).
