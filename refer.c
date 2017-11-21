@@ -267,6 +267,7 @@ static void refer_cite(char *s)
 	int id[256];
 	int nid = 0;
 	int i = 0;
+	msg[0] = '\0';
 	while (!nid || multiref) {
 		char *r = label;
 		while (*s && strchr(" \t\n,", (unsigned char) *s))
@@ -289,7 +290,6 @@ static void refer_cite(char *s)
 	if (!refauth) {		/* numbered citations */
 		/* sort references for cleaner reference intervals */
 		qsort(id, nid, sizeof(id[0]), (void *) intcmp);
-		msg[0] = '\0';
 		while (i < nid) {
 			int beg = i++;
 			/* reading reference intervals */
@@ -303,12 +303,12 @@ static void refer_cite(char *s)
 				sprintf(msg + strlen(msg), "%d%s%d",
 					id[beg], beg < i - 2 ? "\\-" : ",", id[i - 1]);
 		}
-	} else {		/* year + authors citations */
-		struct ref *cur = cites[id[0]];
-		sprintf(msg, "%s %d", cur->keys['D'] ? cur->keys['D'] : "-", cur->nauth);
-		for (i = 0; i < cur->nauth; i++) {
+	} else if (nid) {	/* year + authors citations */
+		struct ref *ref = cites[id[0]];
+		sprintf(msg, "%s %d", ref->keys['D'] ? ref->keys['D'] : "-", ref->nauth);
+		for (i = 0; i < ref->nauth; i++) {
 			sprintf(msg + strlen(msg), " ");
-			refer_quote(msg + strlen(msg), refer_lastname(cur->auth[i]));
+			refer_quote(msg + strlen(msg), refer_lastname(ref->auth[i]));
 		}
 	}
 	lnput(msg, -1);
