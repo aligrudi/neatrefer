@@ -349,6 +349,16 @@ static int refer_macname(char *mac, int maclen, char *s)
 	return *s != ' ';
 }
 
+/* return 1 if mac is a citation macro */
+static int refer_refmac(char *mac)
+{
+	char *s = refmac ? strstr(refmac, mac) : NULL;
+	if (!mac[0] || !s)
+		return 0;
+	return (s == refmac || s[-1] == ',') &&
+		(!s[strlen(mac)] || s[strlen(mac)] == ',');
+}
+
 static void refer(void)
 {
 	char mac[256];
@@ -368,7 +378,7 @@ static void refer(void)
 		}
 		/* single line citation .cite rudi17 */
 		if (ln[0] == '.' && !refer_reqname(mac, sizeof(mac), ln) &&
-				strstr(refmac, mac)) {
+				refer_refmac(mac)) {
 			int i = 1;
 			while (ln[i] && ln[i] != ' ')
 				i++;
@@ -388,7 +398,7 @@ static void refer(void)
 			r++;
 			if (refer_macname(mac, sizeof(mac), r - 1))
 				continue;
-			if (!strstr(refmac, mac))
+			if (!refer_refmac(mac))
 				continue;
 			if (!strchr(r, ']'))
 				continue;
