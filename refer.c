@@ -153,7 +153,7 @@ static int db_parse(void)
 	return 0;
 }
 
-static char fields[] = "LTABRJDVNPITO";
+static char fields[] = "LTABERJDVNPITOH";
 static char fields_flag[] = "OP";
 static char *kinds[] = {"Other", "Article", "Book", "In book", "Report"};
 
