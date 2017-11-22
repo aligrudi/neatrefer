@@ -165,10 +165,10 @@ static int ref_kind(struct ref *r)
 		return 1;
 	if (r->keys['B'])
 		return 3;
-	if (r->keys['I'])
-		return 2;
 	if (r->keys['R'])
 		return 4;
+	if (r->keys['I'])
+		return 2;
 	return 0;
 }
 
