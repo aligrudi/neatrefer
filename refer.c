@@ -35,12 +35,13 @@ struct ref {
 static struct ref refs[NREFS];	/* all references in refer database */
 static int refs_n;
 static struct ref *cites[NREFS];	/* cited references */
-static int cites_n = 1;
+static int cites_n;
 static int inserted;		/* number of inserted references */
 static int multiref;		/* allow specifying multiple references */
 static int accumulate;		/* accumulate all references */
 static int initials;		/* initials for authors' first name */
 static int refauth;		/* use author-year citations */
+static int sortall;		/* sort references */
 static char *refmac;		/* citation macro name */
 static FILE *refdb;		/* the database file */
 
@@ -139,6 +140,7 @@ static void db_ref(struct ref *ref, char *ln)
 				ref->auth[ref->nauth++] = ref_author(r);
 			else
 				ref->keys[(unsigned char) ln[1]] = sdup(r);
+			ref->id = -1;
 		}
 	} while ((ln = dbget()) && ln[0] != '\n');
 }
@@ -197,14 +199,49 @@ static void ref_ins(struct ref *ref, int id)
 	lnput(buf, s - buf);
 }
 
+static char *lastname(char *name)
+{
+	char *last = name;
+	while (*name) {
+		if (!islower((unsigned char) last[0]))
+			last = name;
+		while (*name && *name != ' ')
+			if (*name++ == '\\')
+				name++;
+		while (*name == ' ')
+			name++;
+	}
+	return last;
+}
+
+static int refcmp(struct ref *r1, struct ref *r2)
+{
+	if (!r2->nauth || (r1->keys['H'] && !r2->keys['H']))
+		return -1;
+	if (!r1->nauth || (!r1->keys['H'] && r2->keys['H']))
+		return 1;
+	return strcmp(lastname(r1->auth[0]), lastname(r2->auth[0]));
+}
+
 /* print all references */
 static void ref_all(void)
 {
-	int i;
+	int i, j;
+	struct ref **sorted;
+	sorted = malloc(cites_n * sizeof(sorted[0]));
+	memcpy(sorted, cites, cites_n * sizeof(sorted[0]));
+	if (sortall == 'a') {
+		for (i = 1; i < cites_n; i++) {
+			for (j = i - 1; j >= 0 && refcmp(cites[i], sorted[j]) < 0; j--)
+				sorted[j + 1] = sorted[j];
+			sorted[j + 1] = cites[i];
+		}
+	}
 	lnput(".]<\n", -1);
-	for (i = 1; i < cites_n; i++)
-		ref_ins(cites[i], i);
+	for (i = 0; i < cites_n; i++)
+		ref_ins(sorted[i], sorted[i]->id + 1);
 	lnput(".]>", -1);
+	free(sorted);
 }
 
 static int intcmp(void *v1, void *v2)
@@ -221,26 +258,11 @@ static int refer_seen(char *label)
 			break;
 	if (i == refs_n)
 		return -1;
-	if (!refs[i].id) {
+	if (refs[i].id < 0) {
 		refs[i].id = cites_n++;
 		cites[refs[i].id] = &refs[i];
 	}
 	return refs[i].id;
-}
-
-static char *refer_lastname(char *name)
-{
-	char *last = name;
-	while (*name) {
-		if (!islower((unsigned char) last[0]))
-			last = name;
-		while (*name && *name != ' ')
-			if (*name++ == '\\')
-				name++;
-		while (*name == ' ')
-			name++;
-	}
-	return last;
 }
 
 static void refer_quote(char *d, char *s)
@@ -298,17 +320,17 @@ static void refer_cite(char *s)
 			if (beg)
 				sprintf(msg + strlen(msg), ",");
 			if (beg == i - 1)
-				sprintf(msg + strlen(msg), "%d", id[beg]);
+				sprintf(msg + strlen(msg), "%d", id[beg] + 1);
 			else
 				sprintf(msg + strlen(msg), "%d%s%d",
-					id[beg], beg < i - 2 ? "\\-" : ",", id[i - 1]);
+					id[beg] + 1, beg < i - 2 ? "\\-" : ",", id[i - 1] + 1);
 		}
 	} else if (nid) {	/* year + authors citations */
 		struct ref *ref = cites[id[0]];
 		sprintf(msg, "%s %d", ref->keys['D'] ? ref->keys['D'] : "-", ref->nauth);
 		for (i = 0; i < ref->nauth; i++) {
 			sprintf(msg + strlen(msg), " ");
-			refer_quote(msg + strlen(msg), refer_lastname(ref->auth[i]));
+			refer_quote(msg + strlen(msg), lastname(ref->auth[i]));
 		}
 	}
 	lnput(msg, -1);
@@ -421,7 +443,8 @@ static char *usage =
 	"\t-m        \tmerge multiple references in a single .[/.] block\n"
 	"\t-i        \tinitials for authors' first and middle names\n"
 	"\t-o xy     \tcitation macro (\\*[xy label])\n"
-	"\t-a        \tuse author-year citation style\n";
+	"\t-a        \tuse author-year citation style\n"
+	"\t-sa       \tsort by author last names\n";
 
 int main(int argc, char *argv[])
 {
@@ -450,6 +473,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'a':
 			refauth = 1;
+			break;
+		case 's':
+			sortall = (unsigned char) (argv[i][2] ? argv[i][2] : argv[++i][0]);
 			break;
 		default:
 			printf("%s", usage);
