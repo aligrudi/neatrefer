@@ -282,11 +282,10 @@ static void refer_quote(char *d, char *s)
 }
 
 /* replace .[ .] macros with reference numbers */
-static void refer_cite(char *s)
+static int refer_cite(int *id, char *s)
 {
 	char msg[256];
 	char label[256];
-	int id[256];
 	int nid = 0;
 	int i = 0;
 	msg[0] = '\0';
@@ -334,9 +333,7 @@ static void refer_cite(char *s)
 		}
 	}
 	lnput(msg, -1);
-	if (!accumulate)
-		for (i = 0; i < nid; i++)
-			ref_ins(cites[id[i]], ++inserted);
+	return nid;
 }
 
 static int slen(char *s, int delim)
@@ -381,21 +378,32 @@ static int refer_refmac(char *mac)
 		(!s[strlen(mac)] || s[strlen(mac)] == ',');
 }
 
+static void refer_insert(int *id, int id_n)
+{
+	int i;
+	for (i = 0; i < id_n; i++)
+		ref_ins(cites[id[i]], ++inserted);
+}
+
 static void refer(void)
 {
 	char mac[256];
+	int id[256];
 	char *s, *r, *ln;
 	while ((ln = lnget())) {
+		int id_n = 0;
 		/* multi-line citations: .[ rudi17 .] */
 		if (ln[0] == '.' && ln[1] == '[') {
 			lnput(ln + 2, slen(ln + 2, '\n'));
 			if ((ln = lnget())) {
-				refer_cite(ln);
+				id_n = refer_cite(id, ln);
 				while (ln && (ln[0] != '.' || ln[1] != ']'))
 					ln = lnget();
 				if (ln)
 					lnput(ln + 2, -1);
 			}
+			if (!accumulate)
+				refer_insert(id, id_n);
 			continue;
 		}
 		/* single line citation .cite rudi17 */
@@ -407,10 +415,12 @@ static void refer(void)
 			while (ln[i] && ln[i] == ' ')
 				i++;
 			lnput(ln, i);
-			refer_cite(ln + i);
+			id_n = refer_cite(id, ln + i);
 			while (ln[i] && ln[i] != ' ' && ln[i] != '\n')
 				i++;
 			lnput(ln + i, -1);
+			if (!accumulate)
+				refer_insert(id, id_n);
 			continue;
 		}
 		s = ln;
@@ -426,12 +436,14 @@ static void refer(void)
 				continue;
 			r = strchr(r, ' ') + 1;
 			lnput(s, r - s);
-			refer_cite(r);
+			id_n = refer_cite(id, r);
 			while (*r && *r != ' ' && *r != ']')
 				r++;
 			s = r;
 		}
 		lnput(s, -1);
+		if (!accumulate)
+			refer_insert(id, id_n);
 	}
 }
 
