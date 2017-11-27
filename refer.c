@@ -43,6 +43,7 @@ static int initials;		/* initials for authors' first name */
 static int refauth;		/* use author-year citations */
 static int sortall;		/* sort references */
 static char *refmac;		/* citation macro name */
+static char *refmac_auth;	/* author-year citation macro name */
 static FILE *refdb;		/* the database file */
 
 #define ref_label(ref)		((ref)->keys['L'])
@@ -281,8 +282,8 @@ static void refer_quote(char *d, char *s)
 	}
 }
 
-/* replace .[ .] macros with reference numbers */
-static int refer_cite(int *id, char *s)
+/* replace .[ .] macros with reference numbers or author-year */
+static int refer_cite(int *id, char *s, int auth)
 {
 	char msg[256];
 	char label[256];
@@ -308,7 +309,7 @@ static int refer_cite(int *id, char *s)
 		if (!*s || *s == '\n' || *s == ']')
 			break;
 	}
-	if (!refauth) {		/* numbered citations */
+	if (!auth) {		/* numbered citations */
 		/* sort references for cleaner reference intervals */
 		qsort(id, nid, sizeof(id[0]), (void *) intcmp);
 		while (i < nid) {
@@ -369,12 +370,12 @@ static int refer_macname(char *mac, int maclen, char *s)
 }
 
 /* return 1 if mac is a citation macro */
-static int refer_refmac(char *mac)
+static int refer_refmac(char *pat, char *mac)
 {
-	char *s = refmac ? strstr(refmac, mac) : NULL;
+	char *s = pat ? strstr(pat, mac) : NULL;
 	if (!mac[0] || !s)
 		return 0;
-	return (s == refmac || s[-1] == ',') &&
+	return (s == pat || s[-1] == ',') &&
 		(!s[strlen(mac)] || s[strlen(mac)] == ',');
 }
 
@@ -396,7 +397,7 @@ static void refer(void)
 		if (ln[0] == '.' && ln[1] == '[') {
 			lnput(ln + 2, slen(ln + 2, '\n'));
 			if ((ln = lnget())) {
-				id_n = refer_cite(id, ln);
+				id_n = refer_cite(id, ln, 0);
 				while (ln && (ln[0] != '.' || ln[1] != ']'))
 					ln = lnget();
 				if (ln)
@@ -408,14 +409,14 @@ static void refer(void)
 		}
 		/* single line citation .cite rudi17 */
 		if (ln[0] == '.' && !refer_reqname(mac, sizeof(mac), ln) &&
-				refer_refmac(mac)) {
+				(refer_refmac(refmac, mac) || refer_refmac(refmac_auth, mac))) {
 			int i = 1;
 			while (ln[i] && ln[i] != ' ')
 				i++;
 			while (ln[i] && ln[i] == ' ')
 				i++;
 			lnput(ln, i);
-			id_n = refer_cite(id, ln + i);
+			id_n = refer_cite(id, ln + i, refer_refmac(refmac_auth, mac));
 			while (ln[i] && ln[i] != ' ' && ln[i] != '\n')
 				i++;
 			lnput(ln + i, -1);
@@ -430,13 +431,13 @@ static void refer(void)
 			r++;
 			if (refer_macname(mac, sizeof(mac), r - 1))
 				continue;
-			if (!refer_refmac(mac))
+			if (!refer_refmac(refmac, mac) && !refer_refmac(refmac_auth, mac))
 				continue;
 			if (!strchr(r, ']'))
 				continue;
 			r = strchr(r, ' ') + 1;
 			lnput(s, r - s);
-			id_n = refer_cite(id, r);
+			id_n = refer_cite(id, r, refer_refmac(refmac_auth, mac));
 			while (*r && *r != ' ' && *r != ']')
 				r++;
 			s = r;
@@ -455,7 +456,7 @@ static char *usage =
 	"\t-m        \tmerge multiple references in a single .[/.] block\n"
 	"\t-i        \tinitials for authors' first and middle names\n"
 	"\t-o xy     \tcitation macro (\\*[xy label])\n"
-	"\t-a        \tuse author-year citation style\n"
+	"\t-a xy     \tauthor-year citation macro (\\*[xy label])\n"
 	"\t-sa       \tsort by author last names\n";
 
 int main(int argc, char *argv[])
@@ -484,7 +485,7 @@ int main(int argc, char *argv[])
 			initials = 1;
 			break;
 		case 'a':
-			refauth = 1;
+			refmac_auth = argv[i][2] ? argv[i] + 2 : argv[++i];
 			break;
 		case 's':
 			sortall = (unsigned char) (argv[i][2] ? argv[i][2] : argv[++i][0]);
