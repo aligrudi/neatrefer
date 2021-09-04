@@ -461,7 +461,8 @@ static char *usage =
 
 int main(int argc, char *argv[])
 {
-	int i, j;
+	int i;
+	size_t j;
 	for (i = 1; i < argc; i++) {
 		switch (argv[i][0] == '-' ? argv[i][1] : 'h') {
 		case 'm':
