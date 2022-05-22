@@ -491,7 +491,7 @@ int main(int argc, char *argv[])
 			sortall = (unsigned char) (argv[i][2] ? argv[i][2] : argv[++i][0]);
 			break;
 		default:
-			printf("%s", usage);
+			fprintf(stderr, "%s", usage);
 			return 1;
 		}
 	}
