@@ -30,6 +30,7 @@ struct ref {
 	char *auth[128];	/* authors */
 	int id;			/* allocated reference id */
 	int nauth;
+	int matches;
 };
 
 static struct ref refs[NREFS];	/* all references in refer database */
@@ -58,6 +59,7 @@ static char *lnget(void)
 /* write an output line */
 static void lnput(char *s, int n)
 {
+	// 0, 1, 2: stdin, stdout, strerr respectively
 	write(1, s, n >= 0 ? n : strlen(s));
 }
 
@@ -250,20 +252,45 @@ static int intcmp(void *v1, void *v2)
 	return *(int *) v1 - *(int *) v2;
 }
 
+// returns the smaller string
+int smlrStr(char *str1, char *str2)
+{
+	return strlen(str1) < strlen(str2) ? strlen(str1) : strlen(str2);
+}
+
+// matches chars in strings
+int getMatches(char *str, char *target)
+{
+	int smlstr = smlrStr(str, target);
+	int i;
+	for (i = 0; i < smlstr; ++i) {
+		if (str[i] != target[i]) {
+			return i;
+		}
+	}
+	return smlstr;
+}
+
+
 /* the given label was referenced; add it to cites[] */
+// searches all references, if found, add to cites[]
+// if two with same amount matches, returns first
 static int refer_seen(char *label)
 {
-	int i;
-	for (i = 0; i < refs_n; i++)
-		if (ref_label(&refs[i]) && !strcmp(label, ref_label(&refs[i])))
-			break;
-	if (i == refs_n)
-		return -1;
-	if (refs[i].id < 0) {
-		refs[i].id = cites_n++;
-		cites[refs[i].id] = &refs[i];
+	int most = 0; // most matches
+	int index; // index of most matches
+	for (int i = 0; i < refs_n; i++) {
+		int getM = getMatches(ref_label(&refs[i]), label);
+		if (ref_label(&refs[i]) && getM > most) {
+			most = getM;
+			index = i;
+		}
 	}
-	return refs[i].id;
+	if (refs[index].id < 0) {
+		refs[index].id = cites_n++;
+		cites[refs[index].id] = &refs[index]; // cites pointer = &refs
+	}
+	return refs[index].id;
 }
 
 static void refer_quote(char *d, char *s)
@@ -285,22 +312,26 @@ static void refer_quote(char *d, char *s)
 /* replace .[ .] macros with reference numbers or author-year */
 static int refer_cite(int *id, char *s, int auth)
 {
+	printf("s1: %s", s);
+	// msg: refrence num
 	char msg[256];
+	// label: .ct argument
 	char label[256];
 	int nid = 0;
 	int i = 0;
 	msg[0] = '\0';
 	while (!nid || multiref) {
 		char *r = label;
-		while (*s && strchr(" \t\n,", (unsigned char) *s))
+		while (*s && strchr("\t\n,", (unsigned char) *s))
 			s++;
-		while (*s && !strchr(" \t\n,]", (unsigned char) *s))
+		while (*s && !strchr("\t\n,]", (unsigned char) *s))
 			*r++ = *s++;
 		*r = '\0';
 		if (!strcmp("$LIST$", label)) {
 			ref_all();
 			break;
 		}
+		printf("s2: %s", label);
 		id[nid] = refer_seen(label);
 		if (id[nid] < 0)
 			fprintf(stderr, "refer: <%s> not found\n", label);
@@ -408,6 +439,7 @@ static void refer(void)
 			continue;
 		}
 		/* single line citation .cite rudi17 */
+		// checks for .cite
 		if (ln[0] == '.' && !refer_reqname(mac, sizeof(mac), ln) &&
 				(refer_refmac(refmac, mac) || refer_refmac(refmac_auth, mac))) {
 			int i = 1;
@@ -415,6 +447,7 @@ static void refer(void)
 				i++;
 			while (ln[i] && ln[i] == ' ')
 				i++;
+			// write to stdout
 			lnput(ln, i);
 			id_n = refer_cite(id, ln + i, refer_refmac(refmac_auth, mac));
 			while (ln[i] && ln[i] != ' ' && ln[i] != '\n')
