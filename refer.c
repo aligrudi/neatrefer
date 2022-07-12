@@ -252,45 +252,65 @@ static int intcmp(void *v1, void *v2)
 	return *(int *) v1 - *(int *) v2;
 }
 
-// returns the smaller string
-int smlrStr(char *str1, char *str2)
+/* iterates over str, tries to match target,
+   returns score of match
+*/
+int getScore(char *str, char *target)
 {
-	return strlen(str1) < strlen(str2) ? strlen(str1) : strlen(str2);
+	float score = 0;
+	float sat = 3;
+	int targetlen = strlen(target);
+	int iters = strlen(target) - strlen(str) - 1;
+	for (int i = 0; i < iters; ++i) {
+		for (int t = 0; t < targetlen; ++t) {
+			if (target[t] != str[t]) {
+				score -= 1;
+				break;
+			}
+		}
+		score += 1;
+		*str += 1;
+	}
+	if (score > 1) {
+		// for every score above 1, divide by saturation (sat)
+		score = (score - 1) / sat + 1;
+	}
+	return score;
 }
 
-// matches chars in strings
-int getMatches(char *str, char *target)
+
+/* the given label was referenced; add it to cites[]
+   for each keyword, get score, if duplicate score
+   return first match */
+static int refer_seen(char *key)
 {
-	int smlstr = smlrStr(str, target);
-	int i;
-	for (i = 0; i < smlstr; ++i) {
-		if (str[i] != target[i]) {
-			return i;
+	float scores[refs_n];
+	float largest = 0;
+	int index; // indentity
+	int duplicates = 0;
+	// get score for each keyword
+	for (char *tok = strtok(key, ' '); tok != NULL; tok = strtok(NULL, ' ')){
+		for (int i = 0; i < refs_n; ++i) {
+			scores[i] += getScore(ref_label(&refs[i]), tok);
+			if (scores[i] > largest) {
+				largest = scores[i];
+				index = i;
+				duplicates = 0;
+			} 	else if (scores[i] == largest) {
+				duplucates += 1;
+			}
 		}
 	}
-	return smlstr;
-}
-
-
-/* the given label was referenced; add it to cites[] */
-// searches all references, if found, add to cites[]
-// if two with same amount matches, returns first
-static int refer_seen(char *label)
-{
-	int most = 0; // most matches
-	int index; // index of most matches
-	for (int i = 0; i < refs_n; i++) {
-		int getM = getMatches(ref_label(&refs[i]), label);
-		if (ref_label(&refs[i]) && getM > most) {
-			most = getM;
-			index = i;
-		}
+	if (duplicates > 0) {
+		printf("%d matches for keywords <%s> found, using first\n", duplicates, key);
 	}
-	if (refs[index].id < 0) {
-		refs[index].id = cites_n++;
-		cites[refs[index].id] = &refs[index]; // cites pointer = &refs
+
+	int iden = refs[index].id;
+	if (iden < 0) {
+		iden = cites_n++;
+		cites[iden] = &refs[index]; // cites pointer = &refs
 	}
-	return refs[index].id;
+	return iden;
 }
 
 static void refer_quote(char *d, char *s)
@@ -331,7 +351,7 @@ static int refer_cite(int *id, char *s, int auth)
 			ref_all();
 			break;
 		}
-		printf("s2: %s", label);
+		printf("s2: %s\n", label);
 		id[nid] = refer_seen(label);
 		if (id[nid] < 0)
 			fprintf(stderr, "refer: <%s> not found\n", label);
@@ -484,13 +504,13 @@ static void refer(void)
 static char *usage =
 	"Usage neatrefer [options] <input >output\n"
 	"Options:\n"
-	"\t-p bib    \tspecify the database file\n"
-	"\t-e        \taccumulate references\n"
-	"\t-m        \tmerge multiple references in a single .[/.] block\n"
-	"\t-i        \tinitials for authors' first and middle names\n"
-	"\t-o xy     \tcitation macro (\\*[xy label])\n"
-	"\t-a xy     \tauthor-year citation macro (\\*[xy label])\n"
-	"\t-sa       \tsort by author last names\n";
+	"\t-p bib	 \tspecify the database file\n"
+	"\t-e		 \taccumulate references\n"
+	"\t-m		 \tmerge multiple references in a single .[/.] block\n"
+	"\t-i		 \tinitials for authors' first and middle names\n"
+	"\t-o xy	 \tcitation macro (\\*[xy label])\n"
+	"\t-a xy	 \tauthor-year citation macro (\\*[xy label])\n"
+	"\t-sa		 \tsort by author last names\n";
 
 int main(int argc, char *argv[])
 {
