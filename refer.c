@@ -48,6 +48,7 @@ static char *refmac_auth;	/* author-year citation macro name */
 static FILE *refdb;		/* the database file */
 
 #define ref_label(ref)		((ref)->keys['L'])
+#define ref_title(ref)		((ref)->keys['T'])
 
 /* the next input line */
 static char *lnget(void)
@@ -257,23 +258,20 @@ static int intcmp(void *v1, void *v2)
 */
 static float getScore(char *str, char *pat)
 {
+	char *ctxt;
 	float score = 0;
 	float sat = 3;
-	int tlen = strlen(pat);
-	int slen = strlen(str);
-	if (slen < tlen) {
-		return 0; // cant match
-	}
-	int iters = slen - tlen + 1;
-	printf("iters: %d\n", iters);
 
-	for (int i = 0; i < iters; ++i) {
-		// matched: += 1, not matched: continue
-		if (strncmp((str + i), pat, tlen)) {
-			continue;
+	// keep original str because of strtok
+	char tmp[strlen(str) + 1];
+	strcpy(tmp, str);
+
+	for (char *tok = strtok(tmp, " "); tok != NULL; tok = strtok(NULL, " ")) {
+		if (!strcmp(tok, pat)) {
+			score += 1;
 		}
-		score += 1;
 	}
+
 	if (score > 1) {
 		// for every score above 1, divide by saturation (sat)
 		score = ((score - 1) / sat) + 1;
@@ -289,44 +287,66 @@ static void strlower(char *str) {
 
 
 /* the given label was referenced; add it to cites[]
-   for each keyword, get score, if duplicate score
-   return first match */
-static int refer_seen(char *key)
+   for each keyword(keys), get score, if duplicate score
+   return first match,
+   if not found, return -1*/
+static int refer_seen(char *keywords)
 {
-	strlower(key);
-	float *scores = calloc(refs_n, sizeof(float));
-	float largest = 0;
+	// keep original keywords because strtok
+	char *ctxt;
+	char keys[strlen(keywords) + 1];
+	strcpy(keys, keywords);
+
+	strlower(keys);
+	float scores[refs_n];
+	memset(scores, 0, refs_n);
+	float lst = 0; // largest score
 	int matches = 0;
-	int index;
+	int idx = -1;
+
+	for (int i = 0; i < strlen(keywords) + 1; ++i) {
+		printf("test: %d\n", keys[i]);
+	}
+
 	// get score for each keyword
-	for (char *tok = strtok(key, " "); tok != NULL; tok = strtok(NULL, " ")){
+	for (char *tok = strtok(keys, " "); tok != NULL; tok = strtok(NULL, " ")) {
+		printf("tok: %s\n", tok);
 		for (int i = 0; i < refs_n; ++i) {
-			strlower(ref_label(&refs[i]));
-			scores[i] += getScore(ref_label(&refs[i]), tok);
-			if (scores[i] > largest) {
-				largest = scores[i];
-				index = i;
+			char *label = ref_label(&refs[i]);
+			/* if (!label) { */
+			/* 	label = ref_title(&refs[i]); */
+			/* } */
+			strlower(label);
+			scores[i] += getScore(label, tok);
+			if (scores[i] > lst) {
+				lst = scores[i];
+				idx = i;
 				matches = 0;
-			} 	else if (scores[i] == largest) {
+			} 	else if (scores[i] == lst) {
 				matches += 1;
 			}
 		}
 	}
-
-	free(scores);
-	if (matches > 1) {
-		fprintf(stderr, "%d matches for keywords <%s> found, using first\n", matches, key);
+	for (int i = 0; i < strlen(keywords) + 1; ++i) {
+		printf("test: %d\n", keys[i]);
 	}
 
-	if (index == refs_n) {
+	if (idx == -1) {
 		return -1;
 	}
-	int iden = refs[index].id;
-	if (iden < 0) {
-		iden = cites_n++;
-		cites[iden] = &refs[index]; // cites pointer = &refs
+
+	if (matches > 1) {
+		fprintf(stderr,
+				"%d matches for keywords <%s> found, using first\n",
+				matches, keys);
 	}
-	return iden;
+
+	int *iden = &(refs[idx].id);
+	if (*iden < 0) {
+		*iden = cites_n++;
+		cites[*iden] = &refs[idx]; // cites pointer = &refs
+	}
+	return *iden;
 }
 
 static void refer_quote(char *d, char *s)
@@ -349,25 +369,25 @@ static void refer_quote(char *d, char *s)
 static int refer_cite(int *id, char *s, int auth)
 {
 	char msg[256];
-	// label: .ct argument
-	char label[256];
+	// keywords: -o citation arguments
+	char keywds[256];
 	int nid = 0;
 	int i = 0;
 	msg[0] = '\0';
 	while (!nid || multiref) {
-		char *r = label;
-		while (*s && strchr("\t\n,", (unsigned char) *s))
+		char *r = keywds;
+		while (*s && strchr(" \t\n,", (unsigned char) *s))
 			s++;
 		while (*s && !strchr("\t\n,]", (unsigned char) *s))
 			*r++ = *s++;
 		*r = '\0';
-		if (!strcmp("$LIST$", label)) {
+		if (!strcmp("$LIST$", keywds)) {
 			ref_all();
 			break;
 		}
-		id[nid] = refer_seen(label);
+		id[nid] = refer_seen(keywds);
 		if (id[nid] < 0)
-			fprintf(stderr, "refer: <%s> not found\n", label);
+			fprintf(stderr, "refer: <%s> not found\n", keywds);
 		else
 			nid++;
 		if (!*s || *s == '\n' || *s == ']')
@@ -483,7 +503,7 @@ static void refer(void)
 			// write to stdout
 			lnput(ln, i);
 			id_n = refer_cite(id, ln + i, refer_refmac(refmac_auth, mac));
-			while (ln[i] && ln[i] != ' ' && ln[i] != '\n')
+			while (ln[i] && ln[i] != '\n')
 				i++;
 			lnput(ln + i, -1);
 			if (!accumulate)
@@ -526,15 +546,14 @@ static char *usage =
 	"\t-sa		 \tsort by author last names\n";
 
 int test() {
-	char text[] = "i by the eating seasons";
-	char pat[] = "eat";
-	printf("text: %s;\npattern: %s;\nresult: %d\n", text, pat, getScore(text, pat));
+	char pat[] = " eat in";
+	printf("result: %d\n", refer_seen(pat));
 	return 0;
 }
 
 int main(int argc, char *argv[])
 {
-	return test();
+	/* return test(); */
 	int i, j;
 	for (i = 1; i < argc; i++) {
 		switch (argv[i][0] == '-' ? argv[i][1] : 'h') {
