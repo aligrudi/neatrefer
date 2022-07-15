@@ -48,7 +48,6 @@ static char *refmac_auth;	/* author-year citation macro name */
 static FILE *refdb;		/* the database file */
 
 #define ref_label(ref)		((ref)->keys['L'])
-#define ref_title(ref)		((ref)->keys['T'])
 
 /* the next input line */
 static char *lnget(void)
@@ -266,7 +265,10 @@ static float getScore(char *str, char *pat)
 	char tmp[strlen(str) + 1];
 	strcpy(tmp, str);
 
-	for (char *tok = strtok(tmp, " "); tok != NULL; tok = strtok(NULL, " ")) {
+	for (char *tok = strtok_r(tmp, " ", &ctxt);
+			tok != NULL;
+			tok = strtok_r(NULL, " ", &ctxt))
+	{
 		if (!strcmp(tok, pat)) {
 			score += 1;
 		}
@@ -304,18 +306,13 @@ static int refer_seen(char *keywords)
 	int matches = 0;
 	int idx = -1;
 
-	for (int i = 0; i < strlen(keywords) + 1; ++i) {
-		printf("test: %d\n", keys[i]);
-	}
-
 	// get score for each keyword
-	for (char *tok = strtok(keys, " "); tok != NULL; tok = strtok(NULL, " ")) {
-		printf("tok: %s\n", tok);
+	for (char *tok = strtok_r(keys, " ", &ctxt);
+			tok != NULL;
+			tok = strtok_r(NULL, " ", &ctxt))
+	{
 		for (int i = 0; i < refs_n; ++i) {
 			char *label = ref_label(&refs[i]);
-			/* if (!label) { */
-			/* 	label = ref_title(&refs[i]); */
-			/* } */
 			strlower(label);
 			scores[i] += getScore(label, tok);
 			if (scores[i] > lst) {
@@ -326,9 +323,6 @@ static int refer_seen(char *keywords)
 				matches += 1;
 			}
 		}
-	}
-	for (int i = 0; i < strlen(keywords) + 1; ++i) {
-		printf("test: %d\n", keys[i]);
 	}
 
 	if (idx == -1) {
