@@ -68,6 +68,7 @@ static char *dbget(void)
 	return refdb ? fgets(buf, sizeof(buf), refdb) : NULL;
 }
 
+/* return record cell info */
 static char *sdup(char *s)
 {
 	char *e = strchr(s, '\n') ? strchr(s, '\n') : strchr(s, '\0');
@@ -137,13 +138,20 @@ static void db_ref(struct ref *ref, char *ln)
 			while (isspace((unsigned char) *r))
 				r++;
 			rstrip(r);
-			if (ln[1] == 'A')
+			if (ln[1] == 'A') {
 				ref->auth[ref->nauth++] = ref_author(r);
-			else
+			}	else {
 				ref->keys[(unsigned char) ln[1]] = sdup(r);
+			}
 			ref->id = -1;
 		}
 	} while ((ln = dbget()) && ln[0] != '\n');
+	char *label = ref->keys['L'];
+	char *title = ref->keys['T'];
+	if (!label && title) {
+		ref->keys['L'] = realloc(label, strlen(title) + 1);
+		strcpy(ref->keys['L'], title);
+	}
 }
 
 /* parse a refer-style bib file and fill refs[] */
@@ -458,6 +466,7 @@ static char *usage =
 	"\t-o xy     \tcitation macro (\\*[xy label])\n"
 	"\t-a xy     \tauthor-year citation macro (\\*[xy label])\n"
 	"\t-sa       \tsort by author last names\n";
+
 
 int main(int argc, char *argv[])
 {
