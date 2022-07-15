@@ -161,7 +161,6 @@ static int db_parse(void)
 	while ((ln = dbget()))
 		if (ln[0] != '\n')
 			db_ref(&refs[refs_n++], ln);
-	printf("rea: %s\n", ref_label(&refs[3]));
 	return 0;
 }
 
@@ -467,6 +466,7 @@ static char *usage =
 	"\t-o xy     \tcitation macro (\\*[xy label])\n"
 	"\t-a xy     \tauthor-year citation macro (\\*[xy label])\n"
 	"\t-sa       \tsort by author last names\n";
+
 
 int main(int argc, char *argv[])
 {
