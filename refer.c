@@ -30,6 +30,7 @@ struct ref {
 	char *auth[128];	/* authors */
 	int id;			/* allocated reference id */
 	int nauth;
+	int matches;
 };
 
 static struct ref refs[NREFS];	/* all references in refer database */
@@ -58,6 +59,7 @@ static char *lnget(void)
 /* write an output line */
 static void lnput(char *s, int n)
 {
+	// 0, 1, 2: stdin, stdout, strerr respectively
 	write(1, s, n >= 0 ? n : strlen(s));
 }
 
@@ -250,20 +252,95 @@ static int intcmp(void *v1, void *v2)
 	return *(int *) v1 - *(int *) v2;
 }
 
-/* the given label was referenced; add it to cites[] */
-static int refer_seen(char *label)
+/* iterates over str, tries to match pattern,
+   returns score of match
+*/
+static float getScore(char *str, char *pat)
 {
-	int i;
-	for (i = 0; i < refs_n; i++)
-		if (ref_label(&refs[i]) && !strcmp(label, ref_label(&refs[i])))
-			break;
-	if (i == refs_n)
-		return -1;
-	if (refs[i].id < 0) {
-		refs[i].id = cites_n++;
-		cites[refs[i].id] = &refs[i];
+	char *ctxt;
+	float score = 0;
+	float sat = 3;
+
+	// keep original str because of strtok
+	char tmp[strlen(str) + 1];
+	strcpy(tmp, str);
+
+	for (char *tok = strtok_r(tmp, " ", &ctxt);
+			tok != NULL;
+			tok = strtok_r(NULL, " ", &ctxt))
+	{
+		if (!strcmp(tok, pat)) {
+			score += 1;
+		}
 	}
-	return refs[i].id;
+
+	if (score > 1) {
+		// for every score above 1, divide by saturation (sat)
+		score = ((score - 1) / sat) + 1;
+	}
+	return score;
+}
+
+static void strlower(char *str) {
+	for (int i = 0; i < strlen(str); ++i) {
+		str[i] = tolower(str[i]);
+	}
+}
+
+
+/* the given label was referenced; add it to cites[]
+   for each keyword(keys), get score, if duplicate score
+   return first match,
+   if not found, return -1*/
+static int refer_seen(char *keywords)
+{
+	// keep original keywords because strtok
+	char *ctxt;
+	char keys[strlen(keywords) + 1];
+	strcpy(keys, keywords);
+
+	strlower(keys);
+	float scores[refs_n];
+	memset(scores, 0, refs_n);
+	float lst = 0; // largest score
+	int matches = 0;
+	int idx = -1;
+
+	// get score for each keyword
+	for (char *tok = strtok_r(keys, " ", &ctxt);
+			tok != NULL;
+			tok = strtok_r(NULL, " ", &ctxt))
+	{
+		for (int i = 0; i < refs_n; ++i) {
+			char *label = ref_label(&refs[i]);
+			strlower(label);
+			scores[i] += getScore(label, tok);
+			if (scores[i] > lst) {
+				lst = scores[i];
+				idx = i;
+				matches = 0;
+			} 	else if (scores[i] == lst) {
+				matches += 1;
+			}
+		}
+	}
+
+	if (idx == -1) {
+		return -1;
+	}
+
+	if (matches > 1) {
+		fprintf(stderr,
+				"%d matches for keywords <%s> found, using first\n",
+				matches, keys);
+	}
+
+	int *iden = &(refs[idx].id);
+	if (*iden < 0) {
+		*iden = cites_n++;
+		cites[*iden] = &refs[idx]; // cites pointer = &refs
+	}
+	return *iden;
 }
 
 static void refer_quote(char *d, char *s)
@@ -286,24 +363,25 @@ static void refer_quote(char *d, char *s)
 static int refer_cite(int *id, char *s, int auth)
 {
 	char msg[256];
-	char label[256];
+	// keywords: -o citation arguments
+	char keywds[256];
 	int nid = 0;
 	int i = 0;
 	msg[0] = '\0';
 	while (!nid || multiref) {
-		char *r = label;
+		char *r = keywds;
 		while (*s && strchr(" \t\n,", (unsigned char) *s))
 			s++;
-		while (*s && !strchr(" \t\n,]", (unsigned char) *s))
+		while (*s && !strchr("\t\n,]", (unsigned char) *s))
 			*r++ = *s++;
 		*r = '\0';
-		if (!strcmp("$LIST$", label)) {
+		if (!strcmp("$LIST$", keywds)) {
 			ref_all();
 			break;
 		}
-		id[nid] = refer_seen(label);
+		id[nid] = refer_seen(keywds);
 		if (id[nid] < 0)
-			fprintf(stderr, "refer: <%s> not found\n", label);
+			fprintf(stderr, "refer: <%s> not found\n", keywds);
 		else
 			nid++;
 		if (!*s || *s == '\n' || *s == ']')
@@ -408,6 +486,7 @@ static void refer(void)
 			continue;
 		}
 		/* single line citation .cite rudi17 */
+		// checks for .cite
 		if (ln[0] == '.' && !refer_reqname(mac, sizeof(mac), ln) &&
 				(refer_refmac(refmac, mac) || refer_refmac(refmac_auth, mac))) {
 			int i = 1;
@@ -415,9 +494,10 @@ static void refer(void)
 				i++;
 			while (ln[i] && ln[i] == ' ')
 				i++;
+			// write to stdout
 			lnput(ln, i);
 			id_n = refer_cite(id, ln + i, refer_refmac(refmac_auth, mac));
-			while (ln[i] && ln[i] != ' ' && ln[i] != '\n')
+			while (ln[i] && ln[i] != '\n')
 				i++;
 			lnput(ln + i, -1);
 			if (!accumulate)
@@ -451,13 +531,14 @@ static void refer(void)
 static char *usage =
 	"Usage neatrefer [options] <input >output\n"
 	"Options:\n"
-	"\t-p bib    \tspecify the database file\n"
-	"\t-e        \taccumulate references\n"
-	"\t-m        \tmerge multiple references in a single .[/.] block\n"
-	"\t-i        \tinitials for authors' first and middle names\n"
-	"\t-o xy     \tcitation macro (\\*[xy label])\n"
-	"\t-a xy     \tauthor-year citation macro (\\*[xy label])\n"
-	"\t-sa       \tsort by author last names\n";
+	"\t-p bib	 \tspecify the database file\n"
+	"\t-e		 \taccumulate references\n"
+	"\t-m		 \tmerge multiple references in a single .[/.] block\n"
+	"\t-i		 \tinitials for authors' first and middle names\n"
+	"\t-o xy	 \tcitation macro (\\*[xy label])\n"
+	"\t-a xy	 \tauthor-year citation macro (\\*[xy label])\n"
+	"\t-sa		 \tsort by author last names\n";
+
 
 int main(int argc, char *argv[])
 {
